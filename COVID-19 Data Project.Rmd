@@ -1,0 +1,875 @@
+---
+title: "Rate of Deaths Due to COVID-19 in the US Territories vs. the US Mainland"
+author: "Angela Wilson"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set
+```
+
+```{r, include = FALSE}
+
+# Load libraries
+library(tidyverse)
+library(factoextra)
+
+# Remove scientific notation
+options(scipen = 999)
+```
+
+------------------------------------------------------------------------
+
+### **Abstract** 
+
+This analysis aims to examine the rate of deaths related to COVID-19 in the United States (US) territories compared to the US mainland. Data shows that the US territories of Guam and Puerto Rico had the highest rate of deaths among all the US territories, with the rate of deaths in Guam being even higher on than on the US Mainland. Absent the presence of the US military, the lower populations in the other US territories may have acted as a protective factor against rate of deaths due to COVID-19.
+
+The Rmd file with the full code for this analysis can be found at
+
+------------------------------------------------------------------------
+
+------------------------------------------------------------------------
+
+### **About the Dataset** 
+
+This dataset was taken from the COVID-19 Data Repository by the Center for Systems Science and Engineering (CSSE) at Johns Hopkins University (<https://github.com/CSSEGISandData/COVID-19>) on 11/09/2024. It contains data collected between 01/22/2020 and 03/09/2023 on global and US cases and deaths related to COVID-19. For our purposes, we focused on US data only.
+
+```{r, echo = FALSE}
+
+# Read in Data
+url_cases = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/refs/heads/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_US.csv"
+raw_cases = read.csv(url_cases)
+
+url_deaths = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/refs/heads/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_deaths_US.csv"
+raw_deaths = read.csv(url_deaths)
+```
+
+------------------------------------------------------------------------
+
+### **Initial Overview of Data** 
+
+Viewing both data raw datasets shows the data presented in a wide format where each date from 01/22/2020 through 03/09/2023 is represented by a separate column. In addition to these dates, the datasets also contain the variables listed in the table below. Descriptions of these variables are taken from the original `README.md` file for these datasets at (<https://github.com/CSSEGISandData/COVID-19/blob/master/csse_covid_19_data/README.md#time-series-summary-csse_covid_19_time_series>).
+
++----------------------------+------------------------------------------------------------------------------------------------------------------------------------+
+| **Column (Variable) Name** | **Description**                                                                                                                    |
++----------------------------+------------------------------------------------------------------------------------------------------------------------------------+
+| `UID`                      | Unique identifier for each row entry                                                                                               |
++----------------------------+------------------------------------------------------------------------------------------------------------------------------------+
+| `iso2`                     | Officially assigned country code identifiers limited to characters.                                                                |
++----------------------------+------------------------------------------------------------------------------------------------------------------------------------+
+| `iso3`                     | Officially assigned country code identifiers.                                                                                      |
++----------------------------+------------------------------------------------------------------------------------------------------------------------------------+
+| `code3`                    | No description given; appears to be first three characters of `UID`.                                                               |
++----------------------------+------------------------------------------------------------------------------------------------------------------------------------+
+| `FIPS`                     | Federal Information Processing Standards code that uniquely identifies counties within the USA.                                    |
++----------------------------+------------------------------------------------------------------------------------------------------------------------------------+
+| `Admin2`                   | County name. US only.                                                                                                              |
++----------------------------+------------------------------------------------------------------------------------------------------------------------------------+
+| `Province_State`           | The name of the state (or territory) within the USA.                                                                               |
++----------------------------+------------------------------------------------------------------------------------------------------------------------------------+
+| `Country_Region`           | The name of the country (US).                                                                                                      |
++----------------------------+------------------------------------------------------------------------------------------------------------------------------------+
+| `Lat`                      | Latitude                                                                                                                           |
++----------------------------+------------------------------------------------------------------------------------------------------------------------------------+
+| `Long_`                    | Longitude                                                                                                                          |
++----------------------------+------------------------------------------------------------------------------------------------------------------------------------+
+| `Combined_Key`             | Concatenates county name and state name                                                                                            |
++----------------------------+------------------------------------------------------------------------------------------------------------------------------------+
+| `Population`               | Population taken from US Census Bureau (<https://www.census.gov/data/datasets/time-series/demo/popest/2010s-counties-total.html>). |
+|                            |                                                                                                                                    |
+|                            | Originally only found in the raw dataset for US deaths.                                                                            |
++----------------------------+------------------------------------------------------------------------------------------------------------------------------------+
+
+------------------------------------------------------------------------
+
+### **Clean and Transform Data** 
+
+The variables `UID`, `iso2`, `FIPS`, `Admin2`, `Country_Region`, `Lat`, `Long_`, and `Combined_Key` are not needed for our analysis, so these variables were removed from our both datasets. `Combined_Key` was removed because out of the five territories in our dataset, only Puerto Rico was given administrative divisions by county. Data from Puerto Rico was aggregated to reflect the way data from the other four territories was recorded.
+
+```{r, echo = FALSE}
+
+# Remove variables: UID, iso2, code3, FIPS, Admin2, 
+#     Country_Region, Lat, Long_, and Combined_Key
+
+cases = raw_cases %>%
+    select(-c(UID, iso2, code3, FIPS, Admin2, Country_Region,
+              Lat,  Long_, Combined_Key))
+
+deaths = raw_deaths %>%
+    select(-c(UID, iso2, code3, FIPS, Admin2, Country_Region,
+              Lat,  Long_, Combined_Key))
+```
+
+We call `unique(cases$Province_State)` and `unique(deaths$Province_State)` to get the distinct values for for that column within each data set. From here, we are able to extract the five US territories identified: "American Samoa", "Guam", "Northern Mariana Islands", "Puerto Rico", and the "Virgin Islands".
+
+To clean and transform the data, we begin by creating subsets for both the number of cases and deaths related to COVID-19 within the US territories. For both subsets, we rename the columns after `Province_State` and set them as date objects. We call `pivot_longer()` to make each date its own entry instead of its own column. Then we combine our cleaned and transformed subsets into one dataframe called `US_territories`. Finally, we create a separate dataframe for each US territory.
+
+```{r, echo = FALSE}
+
+# Create a subset dataframe for cases in the US territories
+territories_cases = cases %>%
+    filter(grepl("American Samoa|Guam|Northern Mariana Islands|Puerto Rico|Virgin Islands", Province_State)) %>%
+    group_by(Province_State)
+
+# Define columns after territories_cases$Province_State
+date_cols = colnames(territories_cases)[-c(1, 2)]
+
+# Remove "X" prefix and convert to date format
+new_date_cols = as.Date(sub("^X", "", date_cols),
+                        format = "%m.%d.%y")
+
+# Reformat the dates to "YYYY-MM-DD" format
+formatted_date_cols = format(new_date_cols, "%Y.%m.%d")
+
+# Assign formatted date column names back to territories_cases
+colnames(territories_cases)[-c(1, 2)] = formatted_date_cols
+
+# Combine rows by both iso3 and Province_State, summing all numeric columns (case counts)
+territories_cases = territories_cases %>%
+    group_by(Province_State, iso3) %>% 
+    summarise(across(where(is.numeric), sum, na.rm = TRUE)) %>%
+    select(iso3, Province_State, everything())
+
+# Sum numeric values across all rows for all territories
+total_cases_row = territories_cases %>%
+    ungroup() %>%
+    summarise(across(where(is.numeric), sum, na.rm = TRUE)) %>%
+    mutate(iso3 = "ALL",
+           Province_State = "All US Territories") %>%
+    select(iso3, Province_State, everything())
+
+# Bind total_cases_row to the original dataframe
+territories_cases = bind_rows(territories_cases,
+                              total_cases_row)
+
+# Call pivot_longer and mutate the date column
+territories_cases = territories_cases %>%
+    pivot_longer(cols = starts_with("20"), names_to = "date",
+                 values_to = "cases") %>%
+    mutate(date = ymd(date))
+```
+
+```{r, echo = FALSE}
+
+# Create a subset dataframe for deaths in the US territories
+territories_deaths = deaths %>%
+    filter(grepl("American Samoa|Guam|Northern Mariana Islands|Puerto Rico|Virgin Islands", Province_State)) %>%
+    group_by(Province_State)
+
+# Define columns after territories_cases$Province_State
+date_cols = colnames(territories_deaths)[-c(1, 2, 3)]
+
+# Remove "X" prefix and convert to Date format
+new_date_cols = as.Date(sub("^X", "", date_cols),
+                        format = "%m.%d.%y")
+
+# Reformat the dates to "YYYY-MM-DD" format
+formatted_date_cols = format(new_date_cols, "%Y.%m.%d")
+
+# Assign formatted date column names back to territories_deaths
+colnames(territories_deaths)[-c(1, 2, 3)] = formatted_date_cols
+
+# Combine rows by both iso3 and Province_State, summing all
+#     numeric columns (case counts)
+territories_deaths = territories_deaths %>%
+    group_by(Province_State, iso3) %>% 
+    summarise(across(where(is.numeric), sum, na.rm = TRUE)) %>%
+    select(iso3, Province_State, everything())
+
+# Sum numeric values across all rows for all territories
+total_deaths_row = territories_deaths %>%
+    ungroup() %>%
+    summarise(across(where(is.numeric), sum, na.rm = TRUE)) %>%
+    mutate(iso3 = "ALL",
+           Province_State = "All US Territories") %>%
+    select(iso3, Province_State, everything())
+
+# Bind total_cases_row to the original dataframe
+territories_deaths = bind_rows(territories_deaths,
+                               total_deaths_row)
+
+# Call pivot_longer and mutate the date column
+territories_deaths = territories_deaths %>%
+    pivot_longer(cols = starts_with("20"), names_to = "date",
+                 values_to = "deaths") %>%
+    mutate(date = ymd(date))
+```
+
+```{r, echo = FALSE}
+
+# Combine subsets for cases and deaths into one subset for
+#     US Territories
+US_territories = territories_cases %>%
+    full_join(territories_deaths) %>%
+    select(iso3, Province_State, Population, everything())
+```
+
+```{r, echo = FALSE}
+
+# Create separate dataframes for each territory
+American_Samoa = US_territories %>%
+    filter(Province_State == "American Samoa")
+
+Guam = US_territories %>%
+    filter(Province_State == "Guam")
+
+Northern_Mariana_Islands = US_territories %>%
+    filter(Province_State == "Northern Mariana Islands")
+
+Puerto_Rico = US_territories %>%
+    filter(Province_State == "Puerto Rico")
+
+Virgin_Islands = US_territories %>%
+    filter(Province_State == "Virgin Islands")
+
+# Create a new dataframe to aggregate data from all territories
+ALL_US_territories = US_territories %>%
+    filter(Province_State == "All US Territories")
+```
+
+To identify states only within the US Mainland, we remove the five territories, the two cruise ships ("Diamond Princess" and "Grand Princess"), and the states of "Alaska" and "Hawaii". We leave the "District of Columbia" within our subsets for the US Mainland.
+
+Like with the data for the US territories, we begin by creating subsets for both cases and deaths within the US Mainland. For both subsets, we rename the columns after `Province_State` and set them as date objects. We calle `pivot_longer()` to make each date its own entry instead of its own column. Then we combine our cleaned and transformed subsets into one dataframe called `US_mainland`.
+
+```{r, echo = FALSE}
+
+# Create a subset dataframe for cases in the US mainland
+mainland_cases = cases %>%
+    filter(!grepl("American Samoa|Guam|Northern Mariana Islands|Puerto Rico|Virgin Islands|Diamond Princess|Grand Princess|Alaska|Hawaii", Province_State)) %>%
+    group_by(Province_State)
+
+# Define columns after mainland_cases$Province_State
+date_cols = colnames(mainland_cases)[-c(1, 2)]
+
+# Remove "X" prefix and convert to Date format
+new_date_cols = as.Date(sub("^X", "", date_cols),
+                        format = "%m.%d.%y")
+
+# Reformat the dates to "YYYY-MM-DD" format
+formatted_date_cols = format(new_date_cols, "%Y.%m.%d")
+
+# Assign formatted date column names back to mainland_cases
+colnames(mainland_cases)[-c(1, 2)] = formatted_date_cols
+
+# Combine rows by both iso3 summing all numeric columns (case 
+#     counts); Recreate the Province_State column with the value
+#     "US Mainland"
+mainland_cases = mainland_cases %>%
+    group_by(iso3) %>% 
+    summarise(across(where(is.numeric), sum, na.rm = TRUE)) %>%
+    mutate(Province_State = "US Mainland") %>%
+    select(iso3, Province_State, everything())
+
+# Call pivot_longer and mutate the date column
+mainland_cases = mainland_cases %>%
+    pivot_longer(cols = starts_with("20"), names_to = "date",
+                 values_to = "cases") %>%
+    mutate(date = ymd(date))
+```
+
+```{r, echo = FALSE}
+
+# Create a subset dataframe for deaths in the US mainland
+mainland_deaths = deaths %>%
+    filter(!grepl("American Samoa|Guam|Northern Mariana Islands|Puerto Rico|Virgin Islands|Diamond Princess|Grand Princess|Alaska|Hawaii", Province_State)) %>%
+    group_by(Province_State)
+
+# Columns after mainland_deaths$Province_State
+date_cols = colnames(mainland_deaths)[-c(1, 2, 3)]
+
+# Define columns after mainland_cases$Province_State
+new_date_cols = as.Date(sub("^X", "", date_cols),
+                        format = "%m.%d.%y")
+
+# Reformat the dates to "YYYY-MM-DD" format
+formatted_date_cols = format(new_date_cols, "%Y.%m.%d")
+
+# Assign formatted date column names back to mainland_deaths
+colnames(mainland_deaths)[-c(1, 2, 3)] = formatted_date_cols
+
+# Combine rows by both iso3 summing all numeric columns (case counts); Recreate the Province_State column with the
+#     value "US Mainland"
+mainland_deaths = mainland_deaths %>%
+    group_by(iso3) %>% 
+    summarise(across(where(is.numeric), sum, na.rm = TRUE)) %>%
+    mutate(Province_State = "US Mainland") %>%
+    select(iso3, Province_State, everything())
+
+# Call pivot_longer and mutate the date column
+mainland_deaths = mainland_deaths %>%
+    pivot_longer(cols = starts_with("20"), names_to = "date",
+                 values_to = "deaths") %>%
+    mutate(date = ymd(date))
+```
+
+```{r, echo = FALSE}
+
+US_mainland = mainland_cases %>%
+    full_join(mainland_deaths) %>%
+    select(iso3, Province_State, Population, everything())
+```
+
+------------------------------------------------------------------------
+
+### **Initial Visualizations**
+
+Before we begin our analysis, we create a plot to visualize the rates of cases and deaths due to COVID-19 within the US mainland from 01/22/2020 to 03/09/2023. The dashed line at the top of the plot shows the US mainland population.
+
+```{r, echo = FALSE}
+
+ggplot(US_mainland) +
+    labs(title = "US Mainland Cases and Deaths",
+         y = NULL, color = NULL, fill = NULL) +
+    geom_area(aes(x = date, y = cases, fill = "Cases"),
+              alpha = 0.3) +
+    geom_area(aes(x = date, y = deaths, fill = "Deaths"),
+              alpha = 0.3) +
+    geom_point(aes(x = date, y = cases, color = "Cases")) +
+    geom_point(aes(x = date, y = deaths, color = "Deaths")) +
+    geom_hline(aes(yintercept = 326581049,
+                   color = "Population"), linetype = 2) +
+    annotate("text", x = as.Date("2021-01-01"), y = 326581049,
+             label = "Population: 326,581,049",
+             vjust = 1.5, hjust = 0,
+             color = "gray4") +
+    scale_y_continuous(labels = scales::comma) +
+    scale_color_manual(values = c("Cases" = "orange",
+                                  "Deaths" = "red",
+                                  "Population" = "gray4")) +
+    scale_fill_manual(values = c("Cases" = "orange",
+                                 "Deaths" = "red")) +
+    theme_light()
+```
+
+Next, we create a similar plot displaying the rates of cases and deaths due to COVID-19 in the US territories as whole. Then, we use the separate dataframes we created for each of the five territories to generate a plot for each one.
+
+```{r, echo = FALSE}
+
+ggplot(ALL_US_territories) +
+    labs(title = "US Territories Cases and Deaths", y = NULL,
+         color = NULL, fill = NULL) +
+    geom_area(aes(x = date, y = cases, fill = "Cases"),
+              alpha = 0.3) +
+    geom_area(aes(x = date, y = deaths, fill = "Deaths"),
+              alpha = 0.3) +
+    geom_point(aes(x = date, y = cases, color = "Cases")) +
+    geom_point(aes(x = date, y = deaths, color = "Deaths")) +
+    geom_hline(aes(yintercept = 4137221, color = "Population"),
+               linetype = 2) +
+    annotate("text", x = as.Date("2021-01-01"), y = 4137221,
+             label = "Population: 4,137,221",
+             vjust = 1.5, hjust = 0,
+             color = "gray4") +
+    scale_y_continuous(labels = scales::comma) +
+    scale_color_manual(values = c("Cases" = "orange",
+                                  "Deaths" = "red",
+                                  "Population" = "gray4")) +
+    scale_fill_manual(values = c("Cases" = "orange",
+                                 "Deaths" = "red")) +
+    theme_light()
+```
+
+```{r, echo = FALSE}
+
+ggplot(American_Samoa) +
+    labs(title = "American Samoa Cases and Deaths",
+         y = NULL, color = NULL, fill = NULL) +
+    geom_area(aes(x = date, y = cases, fill = "Cases"),
+              alpha = 0.3) +
+    geom_area(aes(x = date, y = deaths, fill = "Deaths"),
+              alpha = 0.3) +
+    geom_point(aes(x = date, y = cases, color = "Cases")) +
+    geom_point(aes(x = date, y = deaths, color = "Deaths")) +
+    geom_hline(aes(yintercept = 55641, color = "Population"),
+               linetype = 2) +
+    annotate("text", x = as.Date("2021-01-01"), y = 55641,
+             label = "Population: 55,641", 
+             vjust = 1.5, hjust = 0,
+             color = "gray4") +
+    scale_y_continuous(labels = scales::comma) +
+    scale_color_manual(values = c("Cases" = "orange",
+                                  "Deaths" = "red",
+                                  "Population" = "gray4")) +
+    scale_fill_manual(values = c("Cases" = "orange",
+                                 "Deaths" = "red")) +
+    theme_light()
+```
+
+```{r, echo = FALSE}
+
+ggplot(Guam) +
+    labs(title = "Guam Cases and Deaths", y = NULL,
+         color = NULL, fill = NULL) +
+    geom_area(aes(x = date, y = cases, fill = "Cases"),
+              alpha = 0.3) +
+    geom_area(aes(x = date, y = deaths, fill = "Deaths"),
+              alpha = 0.3) +
+    geom_point(aes(x = date, y = cases, color = "Cases")) +
+    geom_point(aes(x = date, y = deaths, color = "Deaths")) +
+    geom_hline(aes(yintercept = 164229, color = "Population"),
+               linetype = 2) +
+    annotate("text", x = as.Date("2021-01-01"), y = 164229,
+             label = "Population: 164,229", 
+             vjust = 1.5, hjust = 0,
+             color = "gray4") +
+    scale_y_continuous(labels = scales::comma) +
+    scale_color_manual(values = c("Cases" = "orange",
+                                  "Deaths" = "red",
+                                  "Population" = "gray4")) +
+    scale_fill_manual(values = c("Cases" = "orange",
+                                 "Deaths" = "red")) +
+    theme_light()
+```
+
+```{r, echo = FALSE}
+
+ggplot(Northern_Mariana_Islands) +
+    labs(title = "Northern Mariana Islands Cases and Deaths",
+         y = NULL, color = NULL, fill = NULL) +
+    geom_area(aes(x = date, y = cases, fill = "Cases"),
+              alpha = 0.3) +
+    geom_area(aes(x = date, y = deaths, fill = "Deaths"),
+              alpha = 0.3) +
+    geom_point(aes(x = date, y = cases, color = "Cases")) +
+    geom_point(aes(x = date, y = deaths, color = "Deaths")) +
+    geom_hline(aes(yintercept = 55144, color = "Population"),
+               linetype = 2) +
+    annotate("text", x = as.Date("2021-01-01"), y = 55144,
+             label = "Population: 55,144", 
+             vjust = 1.5, hjust = 0,
+             color = "gray4") +
+    scale_y_continuous(labels = scales::comma) +
+    scale_color_manual(values = c("Cases" = "orange",
+                                  "Deaths" = "red",
+                                  "Population" = "gray4")) +
+    scale_fill_manual(values = c("Cases" = "orange",
+                                 "Deaths" = "red")) +
+    theme_light()
+```
+
+```{r, echo = FALSE}
+
+ggplot(Puerto_Rico) +
+    labs(title = "Puerto Rico Cases and Deaths", y = NULL,
+         color = NULL, fill = NULL) +
+    geom_area(aes(x = date, y = cases, fill = "Cases"),
+              alpha = 0.3) +
+    geom_area(aes(x = date, y = deaths, fill = "Deaths"),
+              alpha = 0.3) +
+    geom_point(aes(x = date, y = cases, color = "Cases")) +
+    geom_point(aes(x = date, y = deaths, color = "Deaths")) +
+    geom_hline(aes(yintercept = 3754939, color = "Population"),
+               linetype = 2) +
+    annotate("text", x = as.Date("2021-01-01"), y = 3754939,
+             label = "Population: 3,754,939", 
+             vjust = 1.5, hjust = 0,
+             color = "gray4") +
+    scale_y_continuous(labels = scales::comma) +
+    scale_color_manual(values = c("Cases" = "orange",
+                                  "Deaths" = "red",
+                                  "Population" = "gray4")) +
+    scale_fill_manual(values = c("Cases" = "orange",
+                                 "Deaths" = "red")) +
+    theme_light()
+```
+
+```{r, echo = FALSE}
+
+ggplot(Virgin_Islands) +
+    labs(title = "Virgin Islands Cases and Deaths",
+         y = NULL, color = NULL, fill = NULL) +
+    geom_area(aes(x = date, y = cases, fill = "Cases"),
+              alpha = 0.3) +
+    geom_area(aes(x = date, y = deaths, fill = "Deaths"),
+              alpha = 0.3) +
+    geom_point(aes(x = date, y = cases, color = "Cases")) +
+    geom_point(aes(x = date, y = deaths, color = "Deaths")) +
+    geom_hline(aes(yintercept = 107268, color = "Population"),
+               linetype = 2) +
+    annotate("text", x = as.Date("2021-01-01"), y = 107268,
+             label = "Population: 107,268", 
+             vjust = 1.5, hjust = 0,
+             color = "gray4") +
+    scale_y_continuous(labels = scales::comma) +
+    scale_color_manual(values = c("Cases" = "orange",
+                                  "Deaths" = "red",
+                                  "Population" = "gray4")) +
+    scale_fill_manual(values = c("Cases" = "orange",
+                                 "Deaths" = "red")) +
+    theme_light()
+```
+
+Finally, we summarize the maximum values for the number of cases and deaths due to COVID-19 as a proportion of the the population from each plot above into the table below.
+
+```{r, echo = FALSE}
+
+US_mainland_prop = US_mainland %>% 
+    summarize(region = "US Mainland",
+              "cases (% population)" = round(
+                  max(cases) / Population[1] * 100, 5),
+              "population" = Population[1],
+              "deaths (% population)" = round(
+                  max(deaths) / Population[1] * 100, 5))
+
+ALL_US_territories_prop = ALL_US_territories %>% 
+    summarize(region = "US Territories", 
+              "cases (% population)" = round(
+                  max(cases) / Population[1] * 100, 5),
+              "population" = Population[1],
+              "deaths (% population)" = round(
+                  max(deaths) / Population[1] * 100, 5))
+
+American_Samoa_prop = American_Samoa %>% 
+    summarize(region = "American Samoa", 
+              "cases (% population)" = round(
+                  max(cases) / Population[1] * 100, 5),
+              "population" = Population[1],
+              "deaths (% population)" = round(
+                  max(deaths) / Population[1] * 100, 5))
+
+Guam_prop = Guam %>% 
+    summarize(region = "Guam", 
+              "cases (% population)" = round(
+                  max(cases) / Population[1] * 100, 5),
+              "population" = Population[1],
+              "deaths (% population)" = round(
+                  max(deaths) / Population[1] * 100, 5))
+
+Northern_Mariana_Islands_prop = Northern_Mariana_Islands %>% 
+    summarize(region = "Northern Mariana Islands", 
+              "cases (% population)" = round(
+                  max(cases) / Population[1] * 100, 5),
+              "population" = Population[1],
+              "deaths (% population)" = round(
+                  max(deaths) / Population[1] * 100, 5))
+
+Puerto_Rico_prop = Puerto_Rico %>% 
+    summarize(region = "Puerto Rico", 
+              "cases (% population)" = round(
+                  max(cases) / Population[1] * 100, 5),
+              "population" = Population[1],
+              "deaths (% population)" = round(
+                  max(deaths) / Population[1] * 100, 5))
+
+Virgin_Islands_prop = Virgin_Islands %>% 
+    summarize(region = "Virgin Islands", 
+              "cases (% population)" = round(
+                  max(cases) / Population[1] * 100, 5),
+              "population" = Population[1],
+              "deaths (% population)" = round(
+                  max(deaths) / Population[1] * 100, 5))
+
+# Combine all summaries into one data frame
+summary_table = bind_rows(US_mainland_prop, 
+                          ALL_US_territories_prop,
+                          American_Samoa_prop, Guam_prop,
+                          Northern_Mariana_Islands_prop,
+                          Puerto_Rico_prop, Virgin_Islands_prop)
+summary_table %>%
+    select(-Province_State) %>%
+    select(region, population, everything())
+```
+
+------------------------------------------------------------------------
+
+### **Analysis**
+
+Before we begin our formal analysis, we create new variables for each dataset showing the rates of COVID-19 cases and deaths as a percentage of the population.
+
+```{r, echo = FALSE}
+
+US_mainland = US_mainland %>%
+    mutate(cases_rate = round((cases / Population) * 100, 2), deaths_rate = round((deaths / Population) * 100, 2))
+
+ALL_US_territories = ALL_US_territories %>%
+    mutate(cases_rate = round((cases / Population) * 100, 2), deaths_rate = round((deaths / Population) * 100, 2))
+
+American_Samoa = American_Samoa %>%
+    mutate(cases_rate = round((cases / Population) * 100, 2), deaths_rate = round((deaths / Population) * 100, 2))
+
+Guam = Guam %>%
+    mutate(cases_rate = round((cases / Population) * 100, 2), deaths_rate = round((deaths / Population) * 100, 2))
+
+Northern_Mariana_Islands = Northern_Mariana_Islands %>%
+    mutate(cases_rate = round((cases / Population) * 100, 2), deaths_rate = round((deaths / Population) * 100, 2))
+
+Puerto_Rico = Puerto_Rico %>%
+    mutate(cases_rate = round((cases / Population) * 100, 2), deaths_rate = round((deaths / Population) * 100, 2))
+
+Virgin_Islands = Virgin_Islands %>%
+    mutate(cases_rate = round((cases / Population) * 100, 2), deaths_rate = round((deaths / Population) * 100, 2))
+```
+
+For each region, we create models to determine which variable had a greater impact on the rate of deaths due to COVID-19 as a percentage of the population: the number cases, the number of deaths, or the rate of cases as a percentage of the population. Our level of significance is set to $\alpha = 0.05$.
+
+#### **US Mainland** 
+
+We run principal component analysis (PCA) through the US Mainland dataset and use the results as our control. We remove all non-numeric variables then normalize the remaining numeric data. When we run PCA through the normalized dataset, the results show that the number of cases has the strongest proportion of variance among our variables $(0.9887938)$ suggesting that the number of cases accounts for most of the variance in our dataset. This is further supported by the scree plot visualization.
+
+Examining the loading matrix reveals that the number of cases and the rate of cases both have a high positive load value on the rate of deaths. The higher load value on the rate of cases $(0.7063517217)$ suggests that it has a stronger correlation with the rate of deaths than the number of cases $(0.4999689)$. On the other hand, the high negative load value for the number of deaths $(-0.5010971)$ suggests that this variable is weakly correlated with the rate of deaths. This is further supported by the cos2 plot showing the contributions of each variable to the rate of deaths. Surprisingly, the biplot-cos2 plot shows that the number of cases and the rate of cases have an equally high cos2 attribute while the number of deaths and the rate of deaths have an equally low cos2 attribute.
+
+The population of the US Mainland was reported as $(326581049)$. This was the highest population out of all the regions we considered for this analysis. Earlier, we found that the US Mainland had the highest rate of deaths as a percentage of the population at $(0.34113 \%)$ and the second highest rate of cases as a percentage of the population at $(31.20358 \%)$
+
+```{r, echo = FALSE}
+
+# Filter only numeric data
+US_mainland_num = US_mainland %>%
+    select(where(is.numeric))
+
+# Normalize data
+US_mainland_scaled = as.data.frame(scale(US_mainland_num))
+US_mainland_scaled = US_mainland_scaled %>%
+    select(-Population)
+
+# PCA
+US_mainland_pca = princomp(US_mainland_scaled)
+print(summary(US_mainland_pca))
+US_mainland_pca$loadings[, c(1, 2, 3, 4)]
+
+# PCA Visualization
+fviz_eig(US_mainland_pca, addlabels = TRUE)
+fviz_cos2(US_mainland_pca, choice = "var", axes = 4)
+fviz_pca_var(US_mainland_pca, col.var = "cos2",
+             gradient.cols = c("blue", "gray", "red"),
+             repel = TRUE)
+```
+
+#### **All US Territories**
+
+We repeat this process with the dataset for all US Territories. When we run PCA through the normalized dataset, the resuls show that the number of cases has the strongest proportion of variance among our variables $(0.9611412)$ suggesting that the number of cases accounts for most of the variance in our dataset. This is further supported by the scree plot visualization. This is slightly lower than what we see in the US Mainland, but not significantly so.
+
+Examining the loading matrix reveals that the number of cases and the rate of cases both have a high positive load value on the rate of deaths. The higher load value on the rate of cases $(0.69515214)$ suggests that it has a stronger correlation with the rate of deaths than the number of cases $(0.4992000)$. On the other hand, the high negative load value for the number of deaths $(-0.5172648)$ suggests that this variable is weakly correlated with the rate of deaths. This is further supported by the cos2 plot showing the contributions of each variable to the rate of deaths. All these values are fairly similar to the results from the US Mainland.
+
+Again, the biplot-cos2 plot shows that the number of cases and the rate of cases have an equally high cos2 attribute. The number of deaths has a slightly higher cos2 attribute than the rate of deaths, but both are still low overall.
+
+The population for all US territories was reported as $(4137221)$. Since this sums up the population of all five territories, it is the second highest population in our analysis. Earlier, we found that the US territories as a whole had the third highest rate of deaths as a percentage of the population at $(0.15585 \%)$ and the second highest rate of cases as a percentage of the population at $(29.22964 \%)$. So far, the results are fairly similar to what we see in the US Mainland.
+
+```{r, echo = FALSE}
+
+# Filter only numeric data
+ALL_US_territories_num = ALL_US_territories %>%
+    ungroup() %>%
+    select(where(is.numeric))
+
+# Normalize data
+ALL_US_territories_scaled = as.data.frame(scale(ALL_US_territories_num))
+ALL_US_territories_scaled = ALL_US_territories_scaled %>%
+    select(-Population)
+
+# PCA
+ALL_US_territories_pca = princomp(ALL_US_territories_scaled)
+print(summary(ALL_US_territories_pca))
+ALL_US_territories_pca$loadings[, c(1, 2, 3, 4)]
+
+# PCA Visualization
+fviz_eig(ALL_US_territories_pca, addlabels = TRUE)
+fviz_cos2(ALL_US_territories_pca, choice = "var", axes = 4)
+fviz_pca_var(ALL_US_territories_pca, col.var = "cos2",
+             gradient.cols = c("blue", "gray", "red"),
+             repel = TRUE)
+```
+
+##### **American Samoa**
+
+When we run PCA through the normalized dataset for American Samoa, the results show the number of cases has the strongest proportion of variance among our variables $(0.9940509)$ suggesting that the number of cases accounts for most of the variance in our dataset. This is further supported by the scree plot visualization.
+
+Examining the loading matrix reveals that the number of cases and the rate of cases both have a high positive load value on the rate of deaths. The higher load value on the rate of cases $(0.63492146)$ suggests that it has a stronger correlation with the rate of deaths than the number of cases $(0.4994065)$. On the other hand, the high negative load value for the number of deaths $(-0.5894640)$ suggests that this variable is weakly correlated with the rate of deaths. This is further supported by the cos2 plot showing the contributions of each variable to the rate of deaths. The load factor for the rate of cases is significantly lower than what we saw in the US Mainland. On the other hand, the load factor for the number of deaths is significantly higher.
+
+Again, the biplot-cos2 plot shows that the number of cases and the rate of cases have an equally high cos2 attribute. The number of deaths has a slightly higher cos2 attribute than the rate of deaths, but both are still low overall.
+
+Since our our results here differ from what we saw in the US Mainland, it is important to note that the population of American Samoa $(55641)$ is significantly lower than the population of the US Mainland $(326581049)$, making it the second lowest population of the regions in our analysis. American Samoa also had the lowest rate of deaths $(0.06111 \%)$ and the lowest rate of cases at $(14.95300 \%)$.
+
+```{r, echo = FALSE}
+
+# Filter only numeric data
+American_Samoa_num = American_Samoa %>%
+    ungroup() %>%
+    select(where(is.numeric))
+
+# Normalize data
+American_Samoa_scaled = as.data.frame(scale(American_Samoa_num))
+American_Samoa_scaled = American_Samoa_scaled %>%
+    select(-Population)
+
+# PCA
+American_Samoa_pca = princomp(American_Samoa_scaled)
+print(summary(American_Samoa_pca))
+American_Samoa_pca$loadings[, c(1, 2, 3, 4)]
+
+# PCA Visualization
+fviz_eig(American_Samoa_pca, addlabels = TRUE)
+fviz_cos2(American_Samoa_pca, choice = "var", axes = 4)
+fviz_pca_var(American_Samoa_pca, col.var = "cos2",
+             gradient.cols = c("blue", "gray", "red"),
+             repel = TRUE)
+```
+
+##### **Guam**
+
+When we run PCA through the normalized dataset for Guam, the results show the number of cases has the strongest proportion of variance among our variables $(0.9817319)$ suggesting that the number of cases accounts for most of the variance in our dataset. This is further supported by the scree plot visualization.
+
+Examining the loading matrix reveals that the number of cases and the rate of cases both have a high positive load value on the rate of deaths. The higher load value on the rate of cases $(0.701910351)$ suggests that it has a stronger correlation with the rate of deaths than the number of cases $(0.4998307)$. On the other hand, the high negative load value for the number of deaths $(-0.5074358)$ suggests that this variable is weakly correlated with the rate of deaths. This is further supported by the cos2 plot showing the contributions of each variable to the rate of deaths. This closely reflects the results we see from the US Mainland.
+
+Again, the biplot-cos2 plot shows that the number of cases and the rate of cases have an equally high cos2 attribute. The number of deaths has a slightly higher cos2 attribute than the rate of deaths, but both are still low overall.
+
+The population of the Guam, reported as $(164229)$, is the median population out of all the regions we considered for this analysis. It is surprising that the cos2 scores are so similar to what we see in the US Mainland, considering that Guam had second highest rate of deaths $(0.25574 \%)$ and the highest rate of cases $(37.15970 \%)$, while having a significantly lower population.
+
+```{r, echo = FALSE}
+
+# Filter only numeric data
+Guam_num = Guam %>%
+    ungroup() %>%
+    select(where(is.numeric))
+
+# Normalize data
+Guam_scaled = as.data.frame(scale(Guam_num))
+Guam_scaled = Guam_scaled %>%
+    select(-Population)
+
+# PCA
+Guam_pca = princomp(Guam_scaled)
+print(summary(Guam_pca))
+Guam_pca$loadings[, c(1, 2, 3, 4)]
+
+# PCA Visualization
+fviz_eig(Guam_pca, addlabels = TRUE)
+fviz_cos2(Guam_pca, choice = "var", axes = 4)
+fviz_pca_var(Guam_pca, col.var = "cos2",
+             gradient.cols = c("blue", "gray", "red"),
+             repel = TRUE)
+```
+
+##### **Northern Mariana Islands**
+
+When we run PCA through the normalized dataset for the Northern Mariana Islands, the results show the number of cases has the strongest proportion of variance among our variables $(0.9970103)$ suggesting that the number of cases accounts for most of the variance in our dataset. This is further supported by the scree plot visualization.
+
+Examining the loading matrix reveals that the number of cases and the rate of cases both have a high positive load value on the rate of deaths. The higher load value on the rate of cases $(0.5219205)$ suggests that it has a stronger correlation with the rate of deaths than the number of cases $(0.4994356)$. On the other hand, the high negative load value for the number of deaths $(-0.6914934)$ suggests that this variable is weakly correlated with the rate of deaths. This is further supported by the cos2 plot showing the contributions of each variable to the rate of deaths. Unlike what we saw with the US Mainland, both the load values for rates of cases and deaths were significantly lower.
+
+Again, the biplot-cos2 plot shows that the number of cases and the rate of cases have an equally high cos2 attribute. The number of deaths has a considerably higher cos2 attribute than the rate of deaths, but not significantly so, and both are still low overall.
+
+Since our our results here differ from what we saw in the US Mainland, it is important to note that the population of the Northern Mariana Islands $(55144)$ is the lowest among the regions considered for this analysis. the Northern Mariana Islands also had the second lowest rate of deaths at $(0.07435 \%)$ and the third lowest rate of cases $(24.78239 \%)$.
+
+```{r, echo = FALSE}
+
+# Filter only numeric data
+Northern_Mariana_Islands_num = Northern_Mariana_Islands %>%
+    ungroup() %>%
+    select(where(is.numeric))
+
+# Normalize data
+Northern_Mariana_Islands_scaled = as.data.frame(scale(Northern_Mariana_Islands_num))
+Northern_Mariana_Islands_scaled = Northern_Mariana_Islands_scaled %>%
+    select(-Population)
+
+# PCA
+Northern_Mariana_Islands_pca = princomp(Northern_Mariana_Islands_scaled)
+print(summary(Northern_Mariana_Islands_pca))
+Northern_Mariana_Islands_pca$loadings[, c(1, 2, 3, 4)]
+
+# PCA Visualization
+fviz_eig(Northern_Mariana_Islands_pca, addlabels = TRUE)
+fviz_cos2(Northern_Mariana_Islands_pca, choice = "var", axes = 4)
+fviz_pca_var(Northern_Mariana_Islands_pca, col.var = "cos2",
+             gradient.cols = c("blue", "gray", "red"),
+             repel = TRUE)
+```
+
+##### **Puerto Rico**
+
+When we run PCA through the normalized dataset for Puerto Rico, the results show the number of cases has the strongest proportion of variance among our variables $(0.9569124)$ suggesting that the number of cases accounts for most of the variance in our dataset. This is further supported by the scree plot visualization. This proportion of variance is slightly lower than what we see in the US Mainland, but not significantly so.
+
+Examining the loading matrix revealed that the number of cases and the rate of cases both have a high positive load value on the rate of deaths. The higher load value on the rate of cases $(0.69152622)$ suggests that it has a stronger correlation with the rate of deaths than the number of cases $(0.4988938)$. On the other hand, the high negative load value for the number of deaths $(-0.5223949)$ suggests that this variable is weakly correlated with the rate of deaths. This is further supported by the cos2 plot showing the contributions of each variable to the rate of deaths. This closely reflects the results we see from the US Mainland.
+
+Again, the biplot-cos2 plot shows that the number of cases and the rate of cases have an equally high cos2 attribute. The number of deaths has a slightly higher cos2 attribute than the rate of deaths, but both are still low overall.
+
+The population of the Puerto Rico, reported as $(164229)$, is the third highest population out of all the regions we considered for this analysis. Puerto Rico had the median rate of deaths $(0.15508 \%)$ and the third highest rate of cases $(29.33387 \%)$.
+
+```{r, echo = FALSE}
+
+# Filter only numeric data
+Puerto_Rico_num = Puerto_Rico %>%
+    ungroup() %>%
+    select(where(is.numeric))
+
+# Normalize data
+Puerto_Rico_scaled = as.data.frame(scale(Puerto_Rico_num))
+Puerto_Rico_scaled = Puerto_Rico_scaled %>%
+    select(-Population)
+
+# PCA
+Puerto_Rico_pca = princomp(Puerto_Rico_scaled)
+print(summary(Puerto_Rico_pca))
+Puerto_Rico_pca$loadings[, c(1, 2, 3, 4)]
+
+# PCA Visualization
+fviz_eig(Puerto_Rico_pca, addlabels = TRUE)
+fviz_cos2(Puerto_Rico_pca, choice = "var", axes = 4)
+fviz_pca_var(Puerto_Rico_pca, col.var = "cos2",
+             gradient.cols = c("blue", "gray", "red"),
+             repel = TRUE)
+```
+
+##### **Virgin Islands**
+
+When we run PCA through the normalized dataset for the Virgin Islands, the results show the number of cases has the strongest proportion of variance among our variables $(0.9825488)$ suggesting that the number of cases accounts for most of the variance in our dataset. This is further supported by the scree plot visualization.
+
+Examining the loading matrix reveals that the number of cases and the rate of cases both have a high positive load value on the rate of deaths. The higher load value on the rate of cases $(0.701895653)$ suggests that it has a stronger correlation with the rate of deaths than the number of cases $(0.4997321)$. On the other hand, the high negative load value for the number of deaths $(-0.5075532)$ suggests that this variable is weakly correlated with the rate of deaths. This is further supported by the cos2 plot showing the contributions of each variable to the rate of deaths. This closely reflects the results we see from the US Mainland.
+
+Again, the biplot-cos2 plot shows that the number of cases and the rate of cases have an equally high cos2 attribute. The number of deaths has a slightly higher cos2 attribute than the rate of deaths, but both are still low overall.
+
+The population of the the Virgin Islands, reported as $(107268)$, is the third lowest population out of all the regions we considered for this analysis. The Virign Islands had the third lowest rate of deaths $(0.12119 \%)$ and the second lowest rate of cases $(23.13178 \%)$.
+
+```{r, echo = FALSE}
+
+# Filter only numeric data
+Virgin_Islands_num = Virgin_Islands %>%
+    ungroup() %>%
+    select(where(is.numeric))
+
+# Normalize data
+Virgin_Islands_scaled = as.data.frame(scale(Virgin_Islands_num))
+Virgin_Islands_scaled = Virgin_Islands_scaled %>%
+    select(-Population)
+
+# PCA
+Virgin_Islands_pca = princomp(Virgin_Islands_scaled)
+print(summary(Virgin_Islands_pca))
+Virgin_Islands_pca$loadings[, c(1, 2, 3, 4)]
+
+# PCA Visualization
+fviz_eig(Virgin_Islands_pca, addlabels = TRUE)
+fviz_cos2(Virgin_Islands_pca, choice = "var", axes = 4)
+fviz_pca_var(Virgin_Islands_pca, col.var = "cos2",
+             gradient.cols = c("blue", "gray", "red"),
+             repel = TRUE)
+```
+
+------------------------------------------------------------------------
+
+### **Additional Questions** 
+
+Socioeconomic status across the US varies greatly. Different areas across the US mainland and US territories also have different access to government aid and private resources to help mitigate fatal outcomes from COVID-19. These may all have been contributing factors to the varying rates of cases and deaths.
+
+Age demographics were also not included in this analysis. That should be important to note since the elderly are at a greater risk of fatal outcomes from COVID-19.
+
+------------------------------------------------------------------------
+
+### **Conclusion**
+
+The highest rates of cases and deaths among the US territories are found in Guam and Puerto Rico. Both of these territories have active military bases, Anderson Air Force Base in Guam and Fort Buchanan in Puerto Rico. This is especially concerning concerning for Guam, since they had the second highest rate of deaths in our analysis despite only having the median population. Puerto Rico was shown to have the median rate of deaths in our analysis. Our dataset did not contain any information on the professions of people affected by COVID-19, so we cannot determine if most of the victims in these territories were civilians or military personnel and their families. Regardless, the high level of travel around a military base may have contributed to these increased rates found here.
+
+The lowest rates of cases and deaths were found in American Samoa, the Northern Mariana Islands, and the Virgin Islands. These were also the lowest populations within our data set. This suggests that a low population, absent the the presence of a US military base, might have a been protective factor against rate of deaths due to COVID-19.
+
+The rate of cases was found to be the variable most strongly correlated with the rate of deaths. The number cases was the variable found to have the most contribution to proportional variance within in our dataset.
+
+------------------------------------------------------------------------
+
+### **Possible Sources of Bias**
+
+Again, the two territories with the highest death rates were the ones with active military bases. While some might blame the presence of the US military for these increased rates, medical facilities on base see patients from all over the world. It wouldn't be unheard of for active duty military personnel ill with COVID-19 to be sent to base for medical treatment. Their deaths would have been tragic wherever they happened, but these bases may have acted as a bottleneck.
+
+I spent the first 15 years of my life in one of the US territories, but had lived in the US mainland for another 15 years by the time the COVID-19 pandemic hit. I've seen from firsthand experience that the US mainland has more resources available during times of crisis. I also couldn't forget that smaller populations within the territories led to higher levels of social cohesion than could be seen here on the mainland. Those smaller populations also meant the COVID-19 virus had less opportunities to spread.
